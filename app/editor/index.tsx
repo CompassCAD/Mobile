@@ -1,13 +1,14 @@
 import { ThemedText } from "@/components/themed-text";
 import { Colors } from "@/constants/theme";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
-import { GestureResponderEvent, StatusBar, StyleSheet, useWindowDimensions, View } from "react-native";
+import { BackHandler, GestureResponderEvent, Platform, StatusBar, StyleSheet, useWindowDimensions, View } from "react-native";
 import Canvas, { CanvasRenderingContext2D } from "react-native-canvas";
 
 const fixedCanvasHeight = StatusBar.currentHeight! + 20;
 
 export default function Editor() {
+    const router = useRouter();
     const canvas = useRef<Canvas>(null);
     const { width, height } = useWindowDimensions();
     const ctx = useRef<CanvasRenderingContext2D | null>(null);
@@ -28,7 +29,29 @@ export default function Editor() {
             }
         }
     }
-    useEffect(() => {test()}, [])
+    const delayedTest = () => {
+        return new Promise(resolve => {
+            setTimeout(() => {
+                // This is where your original logic (test() or whatever comes after) runs
+                console.log('Delayed action (1s timeout) completed!');
+                // test(); // You can call your test function here
+                resolve(true); 
+            }, 1000);
+        });
+    };
+
+    useEffect(() => {
+        test();
+
+        const backHandler = () => {
+            delayedTest();
+            return true;
+        };
+
+        if (Platform.OS === 'android') {
+            BackHandler.addEventListener('hardwareBackPress', backHandler);
+        }
+    }, []);
     return (
         <>
             <View style={styles.topbar}>
