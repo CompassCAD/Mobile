@@ -44,14 +44,16 @@ export default function Editor() {
         test();
 
         const backHandler = () => {
-            delayedTest();
+            delayedTest().then(() => {
+                router.back();
+            });
             return true;
         };
 
         if (Platform.OS === 'android') {
             BackHandler.addEventListener('hardwareBackPress', backHandler);
         }
-    }, []);
+    }, [router]);
     return (
         <>
             <View style={styles.topbar}>
