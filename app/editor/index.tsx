@@ -1,7 +1,7 @@
 import { ThemedText } from "@/components/themed-text";
 import { Colors } from "@/constants/theme";
 import { useRouter } from "expo-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BackHandler, GestureResponderEvent, Platform, StatusBar, StyleSheet, useWindowDimensions, View } from "react-native";
 import Canvas, { CanvasRenderingContext2D } from "react-native-canvas";
 
@@ -12,6 +12,7 @@ export default function Editor() {
     const canvas = useRef<Canvas>(null);
     const { width, height } = useWindowDimensions();
     const ctx = useRef<CanvasRenderingContext2D | null>(null);
+    const [isTouchHeld, setIsTouchHeld] = useState<boolean>(false);
     const test = () => {
         if (canvas.current) {
             canvas.current.width = width;
@@ -21,13 +22,25 @@ export default function Editor() {
             ctx.current.fillRect(0, 0, 100, 100);
         }
     }
-    const handleTouch = (e: GestureResponderEvent) => {
+    const handleTouchStart = (e: GestureResponderEvent) => {
         if (canvas.current) {
             if (ctx.current) {
+                setIsTouchHeld(true);
                 ctx.current.fillStyle = 'white';
                 ctx.current.fillText('Touched!', e.nativeEvent.locationX, e.nativeEvent.locationY);
             }
         }
+    }
+    const handleTouchMove = (e: GestureResponderEvent) => {
+        if (isTouchHeld && canvas.current) {
+            if (ctx.current) {
+                ctx.current.fillStyle = 'white';
+                ctx.current.fillRect(e.nativeEvent.locationX, e.nativeEvent.locationY, 5, 5);
+            }
+        }
+    }
+    const handleTouchEnd = (e: GestureResponderEvent) => {
+        setIsTouchHeld(false);
     }
     const delayedTest = () => {
         return new Promise(resolve => {
@@ -64,7 +77,7 @@ export default function Editor() {
             <View style={styles.topbar}>
                 <ThemedText type='default' onPress={handleGoBack}>go back</ThemedText>
             </View>
-            <View style={styles.container} onTouchStart={handleTouch}>
+            <View style={styles.container}>
                 <Canvas ref={canvas} style={styles.canvas}/>
             </View>
         </>
