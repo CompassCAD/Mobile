@@ -1,6 +1,6 @@
 import { ThemedText } from "@/components/themed-text";
 import { Colors } from "@/constants/theme";
-import { Link, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { BackHandler, GestureResponderEvent, Platform, StatusBar, StyleSheet, useWindowDimensions, View } from "react-native";
 import Canvas, { CanvasRenderingContext2D } from "react-native-canvas";
@@ -54,10 +54,15 @@ export default function Editor() {
             BackHandler.addEventListener('hardwareBackPress', backHandler);
         }
     }, [router]);
+    const handleGoBack = async () => {
+        await delayedTest();
+        router.push('/');
+    };
+
     return (
         <>
             <View style={styles.topbar}>
-                <ThemedText type='default'><Link href='/'>go back</Link></ThemedText>
+                <ThemedText type='default' onPress={handleGoBack}>go back</ThemedText>
             </View>
             <View style={styles.container} onTouchStart={handleTouch}>
                 <Canvas ref={canvas} style={styles.canvas}/>
