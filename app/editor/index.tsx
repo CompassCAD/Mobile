@@ -4,19 +4,39 @@ import { useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { BackHandler, Platform, StatusBar, StyleSheet, useWindowDimensions, View } from "react-native";
 import Canvas from "react-native-canvas";
+import { GraphicsRenderer, InitializeInstance } from "./GraphicsRenderer";
 
 const fixedCanvasHeight = StatusBar.currentHeight! + 20;
 
 export default function Editor() {
     const router = useRouter();
     const canvas = useRef<Canvas>(null);
+    const renderer = useRef<GraphicsRenderer | null>(null);
     const { width, height } = useWindowDimensions();
+    useEffect(() => {
+        console.log('[editor] setting up canvas and renderer');
+        if (canvas.current) {
+            canvas.current.width = width;
+            canvas.current.height = height - fixedCanvasHeight;
+            renderer.current = new GraphicsRenderer(canvas.current, width, height - fixedCanvasHeight);
+            InitializeInstance(renderer.current);
+            console.log('[editor] initialized renderer')
+        }
+    }, [canvas])
     const delayedTest = () => {
         return new Promise(resolve => {
+            console.log('[editor] unmounting editor and cleaning up renderer');
+            if (renderer.current) {
+                renderer.current = null;
+            }
+            if (canvas.current) {
+                canvas.current = null;
+            }
             setTimeout(() => {
                 // This is where your original logic (test() or whatever comes after) runs
                 console.log('Delayed action (1s timeout) completed!');
                 // test(); // You can call your test function here
+                
                 resolve(true); 
             }, 1000);
         });
