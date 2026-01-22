@@ -93,6 +93,7 @@ export class GraphicsRenderer {
     handles: HandleProperties[];
     dragHandle: string | null;
     lastSelectedComponent: number| null;
+    running: boolean = false;
 
     constructor(
         displayRef: HTMLCanvasElement | Canvas | null,
@@ -188,6 +189,7 @@ export class GraphicsRenderer {
     }
 
     start() {
+        this.running = true;
         this.logicDisplay = new LogicDisplay();
         this.zoom = 1;
         this.temporaryObjectArray = [];
@@ -199,6 +201,49 @@ export class GraphicsRenderer {
         }
         this.context = context;
         console.log('[renderer] started renderer loop')
+    }
+    stop() {
+        this.running = false;
+        
+        // Clear all event listeners
+        this.keyboard = null;
+        this.mouse = null;
+        
+        // Clear canvas context and references
+        if (this.context) {
+            this.context.clearRect(0, 0, this.displayWidth, this.displayHeight);
+            this.context = null;
+        }
+        
+        // Clear display reference
+        this.displayRef = null;
+        
+        // Clear image cache
+        this.imageCache = {};
+        
+        // Clear undo/redo stacks
+        this.undoStack = [];
+        this.redoStack = [];
+        
+        // Clear temporary objects
+        this.temporaryObjectArray = [];
+        this.temporaryVectors = [];
+        this.temporaryPoints = [null, null, null, null, null, null];
+        this.temporaryShape = null;
+        this.temporaryComponentType = null;
+        
+        // Clear handles
+        this.handles = [];
+        this.dragHandle = null;
+        
+        // Clear callbacks
+        this.onComponentChangeCallback = null;
+        this.onComponentArrayChanged = null;
+        
+        // Clear logic display
+        this.logicDisplay = null;
+        
+        console.log('[renderer] stopped renderer loop and cleared all resources')
     }
     refreshSelectionTools() {
         if (this.selectedComponent !== null && this.logicDisplay?.components[this.selectedComponent]) {
@@ -464,8 +509,9 @@ export class GraphicsRenderer {
         moveByX: number,
         moveByY: number
     ) {
-        for (let i = 0; i < components.length; i++) {
-            if (components[i].active == false)
+        const len = components.length;
+        for (let i = 0; i < len; i++) {
+            if (!components[i].active)
                 continue;
 
             this.drawComponent(components[i], moveByX, moveByY)
@@ -1183,25 +1229,34 @@ export class GraphicsRenderer {
                 densityDivisor = 1;
             }
         }
-        const effectiveSpacing = gridSpacingAdjusted * densityDivisor;
+        let effectiveSpacing = gridSpacingAdjusted * densityDivisor;
         const leftBound = -this.displayWidth / 2;
         const rightBound = this.displayWidth / 2;
         const topBound = -this.displayHeight / 2;
         const bottomBound = this.displayHeight / 2;
+        if (effectiveSpacing < 15) {
+            effectiveSpacing = 15;
+        }
         const startX = Math.floor((leftBound - camXoff * this.zoom) / effectiveSpacing) * effectiveSpacing;
         const startY = Math.floor((topBound - camYoff * this.zoom) / effectiveSpacing) * effectiveSpacing;
         const endX = Math.ceil((rightBound - camXoff * this.zoom) / effectiveSpacing) * effectiveSpacing;
         const endY = Math.ceil((bottomBound - camYoff * this.zoom) / effectiveSpacing) * effectiveSpacing;
         this.context!.fillStyle = "#cccccc75";
+        this.context?.beginPath(); 
+
         for (let x = startX; x <= endX; x += effectiveSpacing) {
             for (let y = startY; y <= endY; y += effectiveSpacing) {
-                this.context?.beginPath();
                 const adjustedX = x + camXoff * this.zoom;
                 const adjustedY = y + camYoff * this.zoom;
+
+                // Move to the start of the arc subpath to avoid connecting lines
+                this.context?.moveTo(adjustedX + 1, adjustedY);
                 this.context?.arc(adjustedX, adjustedY, 1, 0, Math.PI * 2);
-                this.context?.fill();
             }
         }
+        
+        // FIX 3: Fill ONCE after the loop.
+        this.context?.fill(); 
     }
     moveComponent(index: number, x: number, y: number) {
         if (index !== null && this.logicDisplay) {
@@ -2181,17 +2236,45 @@ export const InitializeInstance = (renderer: GraphicsRenderer) => {
     renderer.start();
     let animationFrameId: number | null;
     let lastDrawTime = 0;
-    const TARGET_FPS = 60;
-    const FRAME_TIME = 1000 / TARGET_FPS;
+    let isMoving = false;
+    let moveTimeout: ReturnType<typeof setTimeout> | null = null;
+    
+    // Adaptive frame rate based on device performance
+    const getTargetFPS = () => {
+        const cores = navigator.hardwareConcurrency || 4;
+        return cores >= 8 ? 60 : cores >= 4 ? 30 : 24;
+    };
+    
+    let TARGET_FPS = getTargetFPS();
+    let FRAME_TIME = 1000 / TARGET_FPS;
     const FPS_UPDATE_INTERVAL = 500;
 
-    function repeatInstance(timestamp: number = 0) {
+    // Track if components are being modified
+    const trackMovement = () => {
+        isMoving = true;
+        if (moveTimeout) clearTimeout(moveTimeout);
+        moveTimeout = setTimeout(() => {
+            isMoving = false;
+        }, 150);
+    };
 
-        // Throttle to target FPS
+    // Monkey-patch saveState to track movement
+    const originalSaveState = renderer.saveState.bind(renderer);
+    renderer.saveState = function() {
+        trackMovement();
+        return originalSaveState();
+    };
+
+    function repeatInstance(timestamp: number = 0) {
+        if (!renderer.running) return;
+        
+        // Adaptive frame skipping: reduce updates when idle
+        const adaptiveFrameTime = isMoving ? FRAME_TIME : FRAME_TIME * 2;
         const deltaTime = timestamp - lastDrawTime;
-        if (deltaTime >= FRAME_TIME) {
+        
+        if (deltaTime >= adaptiveFrameTime) {
             frameCount++;
-            lastDrawTime = timestamp - (deltaTime % FRAME_TIME);
+            lastDrawTime = timestamp - (deltaTime % adaptiveFrameTime);
 
             // Update FPS counter every 500ms instead of every second
             if (timestamp - lastTime >= FPS_UPDATE_INTERVAL) {

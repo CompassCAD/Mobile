@@ -27,6 +27,7 @@ export default function Editor() {
         return new Promise(resolve => {
             console.log('[editor] unmounting editor and cleaning up renderer');
             if (renderer.current) {
+                renderer.current.stop();
                 renderer.current = null;
             }
             if (canvas.current) {
