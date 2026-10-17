@@ -15,9 +15,11 @@ export class RenderSurface {
     public height: number
   ) {}
   getContext(_kind: '2d'): Context2DLike {
+    console.log('returning stub context for RenderSurface.getContext')
     return this.backend.ctx
   }
   getBoundingClientRect() {
+    console.log('returning stub rect for RenderSurface.getBoundingClientRect')
     return { left: 0, top: 0, right: this.width, bottom: this.height, width: this.width, height: this.height }
   }
   focus(): void {}

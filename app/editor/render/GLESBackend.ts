@@ -47,15 +47,18 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
   private w: number; private h: number; private dpr: number
 
   constructor(gl: ExpoWebGLRenderingContext, width: number, height: number, dpr: number) {
+    console.log('[editor] GLESBackend init', width, height, dpr)
     this.gl = gl; this.w = width; this.h = height; this.dpr = dpr
     this.progColor = this.program(VS, FS_COLOR)
     this.progTex = this.program(VS, FS_TEX)
     this.buf = gl.createBuffer()!
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA) // premultiplied in shader (see flush)
+    console.log('[editor] GLESBackend ready')
   }
 
   private program(vs: string, fs: string): WebGLProgram {
+    console.log('[editor] GLESBackend compiling shader')
     const gl = this.gl
     const mk = (t: number, src: string) => {
       const s = gl.createShader(t)!
@@ -75,16 +78,19 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
     this.w = width; this.h = height; this.dpr = pixelRatio
   }
   beginFrame(): void {
+    console.log('[editor] GLESBackend beginFrame', this.w, this.h, this.dpr)
     const gl = this.gl
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
     this.m = [1, 0, 0, 1, 0, 0]; this.stack.length = 0
     this.count = 0
   }
   endFrame(): void {
+    console.log('[editor] GLESBackend endFrame', this.count)
     this.flush()
     ;(this.gl as ExpoWebGLRenderingContext).endFrameEXP()
   }
   dispose(): void {
+    console.log('[editor] GLESBackend dispose frame')
     this.gl.deleteBuffer(this.buf)
     this.gl.deleteProgram(this.progColor); this.gl.deleteProgram(this.progTex)
   }
@@ -110,6 +116,7 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
 
   // ---- batching ----
   private ensure(extra: number) {
+    console.log('[editor] GLESBackend ensure', this.count, extra)
     const need = this.count + extra
     if (need > MAX_VERTS) { this.flush(); return }
     if (need * 5 > this.f32.length) {

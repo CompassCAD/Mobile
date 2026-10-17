@@ -33,6 +33,7 @@ export default function HomeScreen() {
     <SafeView style={{padding: 20}}>
       <ThemedText type='h2'>Good {msg[period]}! {emojis[period]}</ThemedText>
       <ThemedText type='default'><Link href='/editor'>Let's get you there!</Link></ThemedText>
+      <ThemedText type='default'><Link href='/gltest'>DEBUG: ENTER GL TESTS</Link></ThemedText>
     </SafeView>
   );
 }

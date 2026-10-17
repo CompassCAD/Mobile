@@ -39,6 +39,7 @@ export default function Editor() {
   const [promptText, setPromptText] = useState('')
 
   const boot = useCallback((backend: RenderBackend) => {
+    console.log('[editor] booting with backend', backend.constructor.name)
     const surface = new RenderSurface(backend, width, viewH)
     const r = new GraphicsRenderer(surface, width, viewH)
     renderer.current = r
