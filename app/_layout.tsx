@@ -1,6 +1,5 @@
-import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
-import { SplashScreen, Stack } from 'expo-router';
+import { SplashScreen, Stack, DarkTheme, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import 'react-native-reanimated';
@@ -41,9 +40,6 @@ function RootLayoutNav() {
   useEffect(() => {
     if (Platform.OS === 'android') {
       SystemUI.setBackgroundColorAsync('#1d1d1d');
-      NavigationBar.setPositionAsync("absolute");
-      NavigationBar.setBackgroundColorAsync("transparent");
-      NavigationBar.setButtonStyleAsync('light'); 
     }
   }, []);
   return (
