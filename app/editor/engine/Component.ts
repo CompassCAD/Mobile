@@ -1,4 +1,3 @@
-// Just to ease the engine on typing the code :)
 export const componentTypes = {
     point: 1,
     line: 2,
@@ -19,14 +18,17 @@ export class Component {
     color: string;
     radius: number;
     opacity: number;
+    rotation: number;
     name: string;
+    
     constructor() {
         this.active = true;
         this.type = 0;
         this.color = '#ffffff';
-        this.radius = 2;
+        this.radius = 1;
         this.opacity = 100;
         this.name = 'Component';
+        this.rotation = 0;
     }
     setActive?(state: boolean) {
         this.active = state;
@@ -39,14 +41,15 @@ export class Component {
 export class Point extends Component {
     x: number;
     y: number;
-    constructor(x: number, y: number, opacity?: number, name?: string) {
+    constructor(x: number, y: number, opacity?: number, name?: string, rotation?: number) {
         super();
-        this.radius = 5;
+        this.radius = 3;
         this.type = componentTypes.point;
         this.x = x != undefined ? x : 0;
         this.y = y != undefined ? y : 0;
         this.opacity = opacity != undefined ? opacity : 100;
         this.name = name != undefined ? name : 'Point';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 
@@ -65,7 +68,8 @@ export class Line extends Component {
         radius?: number,
         color?: string,
         opacity?: number, 
-        name?: string
+        name?: string,
+        rotation?: number
     ) {
         super();
         this.radius = radius != undefined ? radius : 2;
@@ -77,6 +81,7 @@ export class Line extends Component {
         this.y2 = y2 != undefined ? y2 : 0;
         this.opacity = opacity != undefined ? opacity : 100;
         this.name = name != undefined ? name : 'Line';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 
@@ -89,11 +94,13 @@ export class Circle extends Line {
         radius?: number,
         color?: string,
         opacity?: number, 
-        name?: string
+        name?: string,
+        rotation?: number
     ) {
         super(x1, y1, x2, y2, radius, color, opacity);
         this.type = componentTypes.circle;
         this.name = name != undefined ? name : 'Circle';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 
@@ -106,11 +113,13 @@ export class Rectangle extends Line {
         radius?: number,
         color?: string,
         opacity?: number, 
-        name?: string
+        name?: string,
+        rotation?: number
     ) {
         super(x1, y1, x2, y2, radius, color, opacity);
         this.type = componentTypes.rectangle;
         this.name = name != undefined ? name : 'Rectangle';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 
@@ -122,11 +131,13 @@ export class Measure extends Line {
         y2: number,
         radius?: number,
         opacity?: number, 
-        name?: string
+        name?: string,
+        rotation?: number
     ) {
         super(x1, y1, x2, y2, radius, '#ffff33', opacity);
         this.type = componentTypes.measure;
         this.name = name != undefined ? name : 'Measure';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 
@@ -139,15 +150,17 @@ export class Label extends Point {
         text?: string,
         fontSize?: number,
         opacity?: number, 
-        name?: string
+        name?: string,
+        rotation?: number,
     ) {
         super(x, y);
+        this.fontSize = fontSize != undefined ? fontSize : 18;
         this.type = componentTypes.label;
         this.color = '#eeeeee';
         this.text = text != undefined ? text : 'Sample text';
-        this.fontSize = fontSize != undefined ? fontSize : 18;
         this.opacity = opacity != undefined ? opacity : 100;
         this.name = name != undefined ? name : 'Label';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 
@@ -171,7 +184,8 @@ export class Arc extends Component {
         radius?: number,
         color?: string,
         opacity?: number, 
-        name?: string
+        name?: string,
+        rotation?: number
     ) {
         super();
         this.radius = radius != undefined ? radius : 2;
@@ -185,6 +199,7 @@ export class Arc extends Component {
         this.y3 = y3 != undefined ? y3 : 0;
         this.opacity = opacity != undefined ? opacity : 100;
         this.name = name != undefined ? name : 'Arc';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 
@@ -196,7 +211,8 @@ export class Shape extends Component {
     constructor(
         x: number,
         y: number, 
-        name?: string
+        name?: string,
+        rotation?: number
     ) {
         super();
         this.type = componentTypes.shape;
@@ -204,6 +220,7 @@ export class Shape extends Component {
         this.y = y != undefined ? y : 0;
         this.components = new Array();
         this.name = name != undefined ? name : 'Shape';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
     addComponent(component: Component) {
         this.components.push(component);
@@ -217,13 +234,15 @@ export class Picture extends Point {
         y: number,
         pictureSource?: string,
         opacity?: number, 
-        name?: string
+        name?: string,
+        rotation?: number
     ) {
         super(x, y);
         this.type = componentTypes.picture;
         this.pictureSource = pictureSource != undefined ? pictureSource : '';
         this.opacity = opacity != undefined ? opacity : 100;
         this.name = name != undefined ? name : 'Picture';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 interface VectorType {
@@ -243,7 +262,7 @@ export class Polygon extends Component {
     color: string;
     strokeColor: string;
     enableStroke: boolean;
-    constructor(vectors: VectorType[], fillColor?: string, strokeColor?: string, opacity?: number, enableStroke?: boolean, name?: string) {
+    constructor(vectors: VectorType[], fillColor?: string, strokeColor?: string, opacity?: number, enableStroke?: boolean, name?: string, rotation?: number) {
         super();
         this.type = componentTypes.polygon;
         this.color = fillColor || "#ffffff";
@@ -252,6 +271,7 @@ export class Polygon extends Component {
         this.enableStroke = enableStroke || true;
         this.opacity = opacity != undefined ? opacity : 100;
         this.name = name != undefined ? name : 'Polygon';
+        this.rotation = rotation != undefined ? rotation : 0;
     }
 }
 export class BoundBox extends Rectangle {

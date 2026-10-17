@@ -1,5 +1,5 @@
 import CanvasToSvg from 'canvas-to-svg'
-import { _num2hex, GraphicsRenderer, VectorType } from './GraphicsRenderer'
+import { _num2hex, GraphicsRenderer, Vector2 as VectorType } from './engine/Engine'
 import { 
     componentTypes, 
     Component, 
@@ -12,7 +12,7 @@ import {
     Arc,
     Polygon,
     BoundBox
-} from './ComponentHandler';
+} from './engine/Component';
 
 export interface SVGExporterSettings {
     padding: number,
