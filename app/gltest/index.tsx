@@ -1,6 +1,9 @@
 import { GLView } from 'expo-gl'
 import { useRef, useState } from 'react'
-import { PixelRatio, StyleSheet, Text, View } from 'react-native'
+import { Pressable, PixelRatio, StyleSheet, Text, View } from 'react-native'
+import { GraphicsRenderer } from '../editor/engine/Engine'
+import { RenderSurface } from '../editor/platform/RenderSurface'
+import { GLESBackend } from '../editor/render/GLESBackend'
 
 /**
  * Standalone GL probe (no engine, no renderer classes). Open with:
@@ -10,6 +13,10 @@ import { PixelRatio, StyleSheet, Text, View } from 'react-native'
  *   B  big yellow triangle (clip space) -> raw draw works
  *   C  green square at (40,40) 120x120 CSS px + cyan 48px square bottom-right
  *                                       -> same program/stride/u_res as GLESBackend
+ * Pick stages with the buttons at the bottom (no auto-cycling):
+ *   D  the REAL GLESBackend, drawn through the Context2DLike API (rect, circle, rounded rect, lines)
+ *   E  the REAL engine (GraphicsRenderer) on the REAL GLESBackend, no toolbar/overlays
+ *   "nb" variants disable GL blending (the only state GLESBackend sets that C does not)
  */
 const VS = `attribute vec2 a_pos; attribute vec4 a_col; uniform vec2 u_res; varying vec4 v_col;
 void main(){ vec2 c=(a_pos/u_res)*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.0,1.0); v_col=a_col; }`
@@ -19,8 +26,10 @@ const FS_RAW = `precision mediump float; void main(){ gl_FragColor=vec4(1.0,0.9,
 
 export default function GLTest() {
   const [info, setInfo] = useState('waiting for GL context…')
-  const stage = useRef<'A' | 'B' | 'C'>('A')
-  const [label, setLabel] = useState('A')
+  type Stage = 'A' | 'B' | 'C' | 'D' | 'D-nb' | 'E' | 'E-nb'
+  const stage = useRef<Stage>('A')
+  const [label, setLabel] = useState<Stage>('A')
+  const pick = (s: Stage) => { stage.current = s; setLabel(s); console.log('[gltest] stage', s) }
 
   const onContext = (gl: any) => {
     const prog = (vs: string, fs: string) => {
@@ -43,12 +52,53 @@ export default function GLTest() {
     console.log('[gltest]', txt)
     setInfo(txt)
 
+    // ---- stages D/E use the real classes, created lazily ----
+    let backend: GLESBackend | null = null
+    let engine: GraphicsRenderer | null = null
+    let engineReady = false
+    const cssW = W / dpr, cssH = H / dpr
+    const realStage = (st: Stage) => {
+      if (!backend) backend = new GLESBackend(gl, cssW, cssH, dpr)
+      const noBlend = st.endsWith('-nb')
+      if (st.startsWith('D')) {
+        backend.beginFrame()
+        if (noBlend) gl.disable(gl.BLEND); else gl.enable(gl.BLEND)
+        const c = backend.ctx
+        c.fillStyle = '#1d1d1d'; c.fillRect(0, 0, cssW, cssH)
+        c.fillStyle = '#00c800'; c.fillRect(40, 80, 120, 120)
+        c.strokeStyle = '#ffffff'; c.lineWidth = 4; c.lineJoin = 'round'; c.lineCap = 'round'
+        c.beginPath(); c.moveTo(40, 260); c.lineTo(200, 300); c.lineTo(120, 380); c.stroke()
+        c.beginPath(); c.arc(cssW / 2, 500, 60, 0, Math.PI * 2); c.stroke()
+        c.fillStyle = '#ff8800'; c.beginPath(); c.roundRect(cssW / 2 - 80, 600, 160, 70, 14); c.fill()
+        backend.endFrame()
+      } else {
+        if (!engine) {
+          const r = new GraphicsRenderer(new RenderSurface(backend, cssW, cssH), cssW, cssH)
+          engine = r
+          r.start().then(() => { engineReady = true }).catch((e) => { console.log('[gltest] engine start failed', String(e)); engineReady = true })
+        }
+        if (engineReady) {
+          engine.markDirty('probe')
+          // update() = beginFrame -> draw -> endFrame (inside the engine, exactly as in the editor)
+          if (noBlend) gl.disable(gl.BLEND); else gl.enable(gl.BLEND) // must be set BEFORE update() flushes
+          engine.update()
+        }
+      }
+    }
     let n = 0
+    let lastErr = ''
     const draw = () => {
+      try { drawFrame() } catch (e) {
+        // an exception used to kill the loop silently, freezing the screen on the previous stage
+        const msg = `${stage.current}: ${(e as Error)?.message ?? e}`
+        if (msg !== lastErr) { lastErr = msg; console.log('[gltest] ERROR', msg, (e as Error)?.stack); setInfo('ERROR ' + msg) }
+      }
+      requestAnimationFrame(draw)
+    }
+    const drawFrame = () => {
       n++
-      const s = Math.floor(n / 180) % 3 // 3s per stage at 60fps
-      const st = (['A', 'B', 'C'] as const)[s]
-      if (st !== stage.current) { stage.current = st; setLabel(st); console.log('[gltest] stage', st, 'glError', gl.getError()) }
+      const st = stage.current
+      if (st.startsWith('D') || st.startsWith('E')) { realStage(st); return }
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
       if (st === 'A') gl.clearColor(1, 0, 1, 1); else gl.clearColor(0.1, 0.1, 0.1, 1)
       gl.clear(gl.COLOR_BUFFER_BIT)
@@ -79,7 +129,6 @@ export default function GLTest() {
         gl.drawArrays(gl.TRIANGLES, 0, 12)
       }
       gl.endFrameEXP()
-      requestAnimationFrame(draw)
     }
     draw()
   }
@@ -88,10 +137,21 @@ export default function GLTest() {
     <View style= { styles.root } >
     <GLView style={ StyleSheet.absoluteFill } onContextCreate = { onContext } />
       <Text style={ styles.t }> stage { label } { info } </Text>
-        </View>
+        < View style = { styles.btns } >
+          {(['A', 'B', 'C', 'D', 'D-nb', 'E', 'E-nb'] as Stage[]).map((s) => (
+            <Pressable key= { s } onPress = {() => pick(s)} style = { [styles.btn, label === s && styles.btnOn]} >
+              <Text style={ styles.bt }> { s } </Text>
+                </Pressable>
+        ))}
+</View>
+  </View>
   )
 }
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#333' },
+  btns: { position: 'absolute', bottom: 24, left: 8, right: 8, flexDirection: 'row', gap: 6, justifyContent: 'center' },
+  btn: { backgroundColor: '#000b', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#888' },
+  btnOn: { backgroundColor: '#0a6cff' },
+  bt: { color: '#fff', fontSize: 13 },
   t: { position: 'absolute', top: 48, left: 8, right: 8, color: '#fff', fontSize: 12, backgroundColor: '#000a', padding: 4 }
 })

@@ -45,20 +45,24 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
   private progTex!: WebGLProgram
   private buf!: WebGLBuffer
   private w: number; private h: number; private dpr: number
+  private selfFrames = 600 // frames to show the engine-independent self-test squares
+  private lastVerts = 0
+  private lastDraws = 0
+  private frameVerts = 0
+  private frameDraws = 0
+  private lastErr = 0
+  private diag = 5 // log the first few draws so a blank canvas is diagnosable from logcat
 
   constructor(gl: ExpoWebGLRenderingContext, width: number, height: number, dpr: number) {
-    console.log('[editor] GLESBackend init', width, height, dpr)
     this.gl = gl; this.w = width; this.h = height; this.dpr = dpr
     this.progColor = this.program(VS, FS_COLOR)
     this.progTex = this.program(VS, FS_TEX)
     this.buf = gl.createBuffer()!
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA) // premultiplied in shader (see flush)
-    console.log('[editor] GLESBackend ready')
   }
 
   private program(vs: string, fs: string): WebGLProgram {
-    console.log('[editor] GLESBackend compiling shader')
     const gl = this.gl
     const mk = (t: number, src: string) => {
       const s = gl.createShader(t)!
@@ -78,19 +82,32 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
     this.w = width; this.h = height; this.dpr = pixelRatio
   }
   beginFrame(): void {
-    console.log('[editor] GLESBackend beginFrame', this.w, this.h, this.dpr)
     const gl = this.gl
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
+    gl.clearColor(0.114, 0.114, 0.114, 1)
+    gl.clear(gl.COLOR_BUFFER_BIT)
     this.m = [1, 0, 0, 1, 0, 0]; this.stack.length = 0
     this.count = 0
   }
+  stats(): string {
+    return `gl ${this.lastDraws}d/${this.lastVerts}v buf ${this.gl.drawingBufferWidth}x${this.gl.drawingBufferHeight} dpr ${this.dpr} err ${this.lastErr}`
+  }
   endFrame(): void {
-    console.log('[editor] GLESBackend endFrame', this.count)
+    if (this.selfFrames > 0) {
+      // Drawn after the engine, outside its transforms: if these squares are missing, GL is not presenting at all.
+      this.selfFrames--
+      this.m = [1, 0, 0, 1, 0, 0]; this.stack.length = 0; this.globalAlpha = 1
+      const W = this.gl.drawingBufferWidth / this.dpr, H = this.gl.drawingBufferHeight / this.dpr
+      this.fillStyle = '#ff00ff'; this.fillRect(0, 0, 48, 48)
+      this.fillStyle = '#00ffff'; this.fillRect(W - 48, H - 48, 48, 48)
+    }
     this.flush()
-    ;(this.gl as ExpoWebGLRenderingContext).endFrameEXP()
+    this.lastVerts = this.frameVerts; this.lastDraws = this.frameDraws
+    this.frameVerts = 0; this.frameDraws = 0
+    this.lastErr = this.gl.getError()
+      ; (this.gl as ExpoWebGLRenderingContext).endFrameEXP()
   }
   dispose(): void {
-    console.log('[editor] GLESBackend dispose frame')
     this.gl.deleteBuffer(this.buf)
     this.gl.deleteProgram(this.progColor); this.gl.deleteProgram(this.progTex)
   }
@@ -116,7 +133,6 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
 
   // ---- batching ----
   private ensure(extra: number) {
-    console.log('[editor] GLESBackend ensure', this.count, extra)
     const need = this.count + extra
     if (need > MAX_VERTS) { this.flush(); return }
     if (need * 5 > this.f32.length) {
@@ -144,15 +160,22 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
     const gl = this.gl
     gl.useProgram(prog)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buf)
-    gl.bufferData(gl.ARRAY_BUFFER, this.f32.subarray(0, this.count * 5), gl.STREAM_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, this.f32.slice(0, this.count * 5), gl.STREAM_DRAW)
     const loc = (n: string) => gl.getAttribLocation(prog, n)
     const pos = loc('a_pos'), uv = loc('a_uv'), col = loc('a_col')
-    gl.enableVertexAttribArray(pos); gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, STRIDE, 0)
-    gl.enableVertexAttribArray(uv); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, STRIDE, 8)
-    gl.enableVertexAttribArray(col); gl.vertexAttribPointer(col, 4, gl.UNSIGNED_BYTE, true, STRIDE, 16)
+    // unused attributes get optimized out by the driver (location -1): never touch those
+    if (pos >= 0) { gl.enableVertexAttribArray(pos); gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, STRIDE, 0) }
+    if (uv >= 0) { gl.enableVertexAttribArray(uv); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, STRIDE, 8) }
+    if (col >= 0) { gl.enableVertexAttribArray(col); gl.vertexAttribPointer(col, 4, gl.UNSIGNED_BYTE, true, STRIDE, 16) }
     gl.uniform2f(gl.getUniformLocation(prog, 'u_res'), gl.drawingBufferWidth / this.dpr, gl.drawingBufferHeight / this.dpr)
     if (tex) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0) }
     gl.drawArrays(gl.TRIANGLES, 0, this.count)
+    this.frameVerts += this.count; this.frameDraws++
+    if (this.diag > 0) {
+      this.diag--
+      const err = gl.getError()
+      console.log(`[gles] draw ${this.count} verts, buffer ${gl.drawingBufferWidth}x${gl.drawingBufferHeight}, glError=${err}`)
+    }
     this.count = 0
   }
   /** premultiplied packed color for current alpha */
@@ -173,14 +196,16 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
   restore(): void {
     const s = this.stack.pop() // unbalanced restore is a no-op, like browsers
     if (!s) return
-    Object.assign(this, { strokeStyle: s.strokeStyle, fillStyle: s.fillStyle, lineWidth: s.lineWidth,
-      lineJoin: s.lineJoin, lineCap: s.lineCap, globalAlpha: s.globalAlpha })
+    Object.assign(this, {
+      strokeStyle: s.strokeStyle, fillStyle: s.fillStyle, lineWidth: s.lineWidth,
+      lineJoin: s.lineJoin, lineCap: s.lineCap, globalAlpha: s.globalAlpha
+    })
     this.m = s.m
   }
   private mul(a: number, b: number, c: number, d: number, e: number, f: number) {
     const m = this.m
     this.m = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d,
-      m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]
+    m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]
   }
   translate(x: number, y: number): void { if (isFinite(x) && isFinite(y)) this.mul(1, 0, 0, 1, x, y) }
   rotate(r: number): void { if (isFinite(r)) { const c = Math.cos(r), s = Math.sin(r); this.mul(c, s, -s, c, 0, 0) } }
