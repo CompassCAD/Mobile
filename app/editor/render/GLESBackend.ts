@@ -98,8 +98,9 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
       this.selfFrames--
       this.m = [1, 0, 0, 1, 0, 0]; this.stack.length = 0; this.globalAlpha = 1
       const W = this.gl.drawingBufferWidth / this.dpr, H = this.gl.drawingBufferHeight / this.dpr
-      this.fillStyle = '#ff00ff'; this.fillRect(0, 0, 48, 48)
-      this.fillStyle = '#00ffff'; this.fillRect(W - 48, H - 48, 48, 48)
+      // Works now so there's absolutely no fucking reason why we need to draw those now
+      //this.fillStyle = '#ff00ff'; this.fillRect(0, 0, 48, 48)
+      //this.fillStyle = '#00ffff'; this.fillRect(W - 48, H - 48, 48, 48)
     }
     this.flush()
     this.lastVerts = this.frameVerts; this.lastDraws = this.frameDraws

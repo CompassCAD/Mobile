@@ -14,6 +14,7 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   const [fontLoaded, error] = useFonts({
+    'Bricolage': require('../assets/fonts/BricolageGrotesque_36pt-Bold.ttf'),
     'RadioCanadaBig': require('../assets/fonts/RadioCanadaBig-Regular.ttf'),
     'RadioCanadaBig-Medium': require('../assets/fonts/RadioCanadaBig-Medium.ttf'),
     'RadioCanadaBig-Semibold': require('../assets/fonts/RadioCanadaBig-SemiBold.ttf'),

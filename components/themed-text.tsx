@@ -26,6 +26,7 @@ export function ThemedText({
         type === 'defaultSemiBold' ? styles.defaultSemiBold : undefined,
         type === 'subtitle' ? styles.subtitle : undefined,
         type === 'link' ? styles.link : undefined,
+        type === 'h1' ? styles.h1 : undefined,
         type === 'h2' ? styles.h2 : undefined,
         style,
       ]}
@@ -47,11 +48,15 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 32,
-    fontFamily: 'RadioCanadaBig-Bold',
+    fontFamily: 'Bricolage',
+  },
+  h1: {
+    fontSize: 28,
+    fontFamily: 'Bricolage',
   },
   h2: {
     fontSize: 24,
-    fontFamily: 'RadioCanadaBig-Bold',
+    fontFamily: 'Bricolage',
   },
   subtitle: {
     fontSize: 20,
