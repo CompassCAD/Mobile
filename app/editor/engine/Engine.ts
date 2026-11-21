@@ -15,6 +15,8 @@ import {
   BoundBox
 } from './Component'
 import { KeyboardHandler, MouseHandler } from './Input'
+import { type DocumentProperties, worldPaperDimensions } from './DocumentProperties'
+import { drawPaperMargin, documentTitleBlockLayout, titleBlockLabels } from './DocumentFrame'
 import { LogicDisplay } from './Logic'
 const DefaultCursor = ''
 const CrosshairCursor = ''
@@ -66,7 +68,12 @@ export const _num2hex = (value: number) => {
   return hexString.toUpperCase()
 }
 
+import { drawFrameWordmark } from '../platform/FrameWordmark'
+import { openDocument, saveDocument } from './DrawingDocument'
+
 export class GraphicsRenderer {
+  openDocument = openDocument
+  saveDocument = saveDocument
   modes: GenericDefiner
   mouseAction: GenericDefiner
   readonly: boolean
@@ -560,6 +567,110 @@ export class GraphicsRenderer {
     this.context?.closePath()
     this.context?.stroke()
   }
+  documentProperties: DocumentProperties | null = null
+  measurementPrecision = 2
+  private paperFitZoom(): number | null {
+    if (this.documentProperties?.canvas !== 'paper') return null
+    const { width, height } = worldPaperDimensions(this.documentProperties)
+    const w = this.displayRef?.width || this.displayWidth
+    const h = this.displayRef?.height || this.displayHeight
+    const fit = Math.min(w * 0.8 / width, h * 0.8 / height)
+    return Number.isFinite(fit) && fit > 0 ? fit : null
+  }
+
+  private clampZoom(zoom: number): number {
+    const base = this.paperFitZoom() ?? 1
+    return Math.min(15 * base, Math.max(0.2 * base, zoom))
+  }
+
+  fitDocumentPaper(): void {
+    const fittedScale = this.paperFitZoom()
+    if (fittedScale === null) return
+
+    this.camX = this.camY = 0
+    this.zoom = this.targetZoom = fittedScale
+    this.onZoomUpdate?.()
+    this.markDirty('fit document paper')
+  }
+
+  drawDocumentPaper(): void {
+    const p = this.documentProperties
+    if (!p || p.canvas === 'infinite' || !p.showPaper || !this.context) return
+    const { width, height, margin } = worldPaperDimensions(p)
+    const ctx = this.context
+    const x = (this.cOutX - width / 2) * this.zoom
+    const y = (this.cOutY - height / 2) * this.zoom
+    ctx.save()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = 1
+    ctx.strokeRect(x, y, width * this.zoom, height * this.zoom)
+    if (margin > 0 && !p.showTitleBlock) {
+      ctx.strokeStyle = '#ffffff'
+      drawPaperMargin(ctx, x + margin * this.zoom, y + margin * this.zoom,
+        (width - margin * 2) * this.zoom, (height - margin * 2) * this.zoom)
+    }
+    ctx.restore()
+  }
+
+  drawDocumentFrame(): void {
+    const p = this.documentProperties
+    const ctx = this.context
+    if (!p || p.canvas !== 'paper' || !p.showPaper || !p.showTitleBlock || !ctx) return
+    const paper = worldPaperDimensions(p)
+    const block = documentTitleBlockLayout(p)
+    const sx = (x: number): number => (x + this.cOutX) * this.zoom
+    const sy = (y: number): number => (y + this.cOutY) * this.zoom
+    ctx.save()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = Math.max(0.6, 0.25 * p.scaleDenominator / p.scaleNumerator / 10 * this.zoom)
+    ctx.strokeRect(sx(-paper.width / 2 + paper.margin), sy(-paper.height / 2 + paper.margin),
+      (paper.width - 2 * paper.margin) * this.zoom, (paper.height - 2 * paper.margin) * this.zoom)
+    for (const cell of block.cells) {
+      const x = sx(cell.x), y = sy(cell.y)
+      const w = cell.width * this.zoom, h = cell.height * this.zoom
+      ctx.strokeRect(x, y, w, h)
+      const padding = Math.min(h * 0.1, w * 0.04)
+      const value = cell.field === 'paper' && p.paper === 'custom'
+        ? 'Custom size' : cell.value
+      this.drawDocumentCellText(titleBlockLabels[cell.field],
+        x + padding, y + padding, w - padding * 2, h * 0.23, '#ffffff')
+      this.drawDocumentCellText(value, x + padding, y + h * 0.44,
+        w - padding * 2, h * 0.4, '#ffffff')
+    }
+    const brand = block.wordmark
+    if (this.displayRef) drawFrameWordmark(this.displayRef, () => this.markDirty('title block'), sx(brand.x), sy(brand.y), brand.width * this.zoom, brand.height * this.zoom)
+    ctx.restore()
+  }
+
+  private drawDocumentCellText(text: string, x: number, y: number, width: number, height: number, color: string): void {
+    const ctx = this.context
+    // Keep arbitrary notes on one line; constrain long metadata to its cell.
+    const glyphs = this._getSpacedGlyphs(text.replace(/\s+/g, ' ').trim().slice(0, 240))
+    if (!ctx || !glyphs || width <= 0 || height <= 0) return
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const glyph of glyphs) for (const cmd of glyph.commands) {
+      minX = Math.min(minX, cmd.x); maxX = Math.max(maxX, cmd.x)
+      minY = Math.min(minY, cmd.y); maxY = Math.max(maxY, cmd.y)
+    }
+    if (!Number.isFinite(minX) || maxY <= minY) return
+    const scale = Math.min(width / Math.max(maxX - minX, 1), height / (maxY - minY))
+    ctx.save()
+    ctx.beginPath()
+    ctx.strokeStyle = color
+    ctx.lineWidth = Math.max(0.45, height * 0.055)
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    for (const glyph of glyphs) for (const cmd of glyph.commands) {
+      const px = x + (cmd.x - minX) * scale
+      const py = y + (maxY - cmd.y) * scale
+      if (cmd.command === 'PD') ctx.moveTo(px, py)
+      else if (cmd.command === 'MP') ctx.lineTo(px, py)
+    }
+    ctx.stroke()
+    ctx.restore()
+  }
+
   cleanUpBeforeImport() {
     this._quadtree = null
     this._isQuadtreeDirty = true
@@ -652,7 +763,7 @@ export class GraphicsRenderer {
         break
       case componentTypes.measure:
         const measure = component as Measure
-        displayText = `L: ${Number(Math.abs(measure.x2 - measure.x1).toFixed(2))} (${Number(this.getDistance(measure.x1, measure.y1, measure.x2, measure.y2) / 100).toFixed(2)}m)`
+        displayText = `L: ${Number(Math.abs(measure.x2 - measure.x1).toFixed(2))} (${Number(this.getDistance(measure.x1, measure.y1, measure.x2, measure.y2) * this.unitConversionFactor).toFixed(this.measurementPrecision)} ${this.unitMeasure})`
         break
       case componentTypes.circle:
         const circle = component as Circle
@@ -906,6 +1017,15 @@ export class GraphicsRenderer {
   // modify saveState() to respect the guard
   saveState(invalidateSpatialIndex: boolean = true) {
     if (this._bulkImportActive) return // suppressed during bulk import; caller snapshots once at the end
+    for (const component of this.logicDisplay?.components ?? []) {
+      const line = component as Line
+      if (line.type !== componentTypes.line || !line.fixedLength) continue
+      const dx = line.x2 - line.x1, dy = line.y2 - line.y1
+      const length = Math.hypot(dx, dy)
+      if (Math.abs(length - line.fixedLength) < 1e-10) continue
+      line.x2 = line.x1 + (length ? dx / length : 1) * line.fixedLength
+      line.y2 = line.y1 + (length ? dy / length : 0) * line.fixedLength
+    }
     this.cleanLog('saving state')
     let snap: string | null = null
     try {
@@ -1167,8 +1287,8 @@ export class GraphicsRenderer {
         return {
           minX: pic.x - pic.radius,
           minY: pic.y - pic.radius,
-          maxX: pic.x + width,
-          maxY: pic.y + height
+          maxX: pic.x + width * (pic.imageScale ?? 1),
+          maxY: pic.y + height * (pic.imageScale ?? 1)
         }
       }
       case componentTypes.boundBox: {
@@ -1546,7 +1666,7 @@ export class GraphicsRenderer {
       }
       case componentTypes.picture: {
         const pic = component as Picture
-        this.drawPicture(pic.x + moveByX, pic.y + moveByY, pic.pictureSource, pic.opacity, rotation)
+        this.drawPicture(pic.x + moveByX, pic.y + moveByY, pic.pictureSource, pic.opacity, rotation, pic.imageScale ?? 1)
         break
       }
       case componentTypes.polygon: {
@@ -2053,7 +2173,7 @@ export class GraphicsRenderer {
       localZoom = 0.5
       localDiff = 20
     }
-    const distanceText = distance.toFixed(2) + '' + this.unitMeasure
+    const distanceText = distance.toFixed(this.measurementPrecision) + ' ' + this.unitMeasure
 
     const targetFontSize = 2 * this.zoom
     const glyphs = this._getSpacedGlyphs(distanceText)
@@ -2256,7 +2376,7 @@ export class GraphicsRenderer {
     this.drawPoint(shape.x, shape.y, shape.color, shape.radius, shape.opacity, rotation)
   }
 
-  drawPicture(x: number, y: number, basedURL: string, opacity: number, rotation: number = 0) {
+  drawPicture(x: number, y: number, basedURL: string, opacity: number, rotation: number = 0, imageScale = 1) {
     this.drawPoint(x, y, '#00ffff', 2, opacity, rotation)
     if (!this.imageCache.has(basedURL)) {
       this.imageCache.set(basedURL, 'ERROR') // placeholder while loading: avoids duplicate loads
@@ -2275,7 +2395,8 @@ export class GraphicsRenderer {
         y,
         cached === 'ERROR' ? null : (cached as BackendImage),
         opacity,
-        rotation
+        rotation,
+        imageScale
       )
     }
   }
@@ -2285,7 +2406,8 @@ export class GraphicsRenderer {
     y: number,
     img: BackendImage | null,
     opacity: number,
-    rotation: number = 0
+    rotation: number = 0,
+    imageScale = 1
   ) {
     if (!img || img === null) {
       const errorShape: Shape = {
@@ -2311,8 +2433,8 @@ export class GraphicsRenderer {
       this.drawShape(errorShape, rotation)
       return
     }
-    const width = img.naturalWidth * this.zoom || 100
-    const height = img.naturalHeight * this.zoom || 100
+    const width = img.naturalWidth * imageScale * this.zoom || 100
+    const height = img.naturalHeight * imageScale * this.zoom || 100
     if (this.context) {
       const dx = (x + this.cOutX) * this.zoom
       const dy = (y + this.cOutY) * this.zoom
@@ -2775,7 +2897,7 @@ export class GraphicsRenderer {
     return intersections[0].index
   }
   undo = (): void => {
-    if (this.undoStack.length > 0) {
+    if (this.undoStack.length > 1) {
       // Remove the last state from the undoStack and push it to the redoStack
       const state = this.undoStack.pop()
       if (state) {
@@ -2801,11 +2923,8 @@ export class GraphicsRenderer {
   }
   redo = (): void => {
     if (this.redoStack.length > 0) {
-      // Move the current state to the undoStack
-      this.undoStack.push(JSON.stringify(this.logicDisplay!.components))
-
-      // Get the last state from the redoStack
-      const state = this.redoStack.pop()
+      const state = this.redoStack.pop()!
+      this.undoStack.push(state)
       this.cleanLog('upcoming state')
       this.cleanLog(state) // Log the state (optional)
       this.cleanLog('parsed state')
@@ -3694,7 +3813,7 @@ export class GraphicsRenderer {
     this.cleanLog(newZoom)
 
     // Zoom interval control
-    if (newZoom <= 0.25 || newZoom >= 15) return
+    newZoom = this.clampZoom(newZoom)
 
     this.targetZoom = newZoom
     const viewportCenterX = this.displayWidth / 2
@@ -3757,6 +3876,7 @@ export class GraphicsRenderer {
     this.zoom = this.targetZoom
     this.updateCamera()
     this.clearGrid()
+    this.drawDocumentPaper()
     if (this.showGrid) this.drawGrid(this.cOutX, this.cOutY)
 
     if (this.showOrigin) this.drawOrigin(this.cOutX, this.cOutY)
@@ -3764,6 +3884,7 @@ export class GraphicsRenderer {
     this.drawAllComponents(this.logicDisplay!.components, 0, 0, true)
     if (this.temporaryComponentType != null) this.drawTemporaryComponent()
     this.flushBatchedPaths()
+    this.drawDocumentFrame()
     this.drawRules()
     this.refreshSelectionTools()
     if (this._debugMode) {

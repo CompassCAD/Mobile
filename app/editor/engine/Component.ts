@@ -13,6 +13,9 @@ export const componentTypes = {
 }
 
 export class Component {
+    groupId?: string;
+    groupName?: string;
+    imageScale?: number;
     active: boolean;
     type: number;
     color: string;
@@ -54,6 +57,7 @@ export class Point extends Component {
 }
 
 export class Line extends Component {
+    fixedLength?: number;
     x1: number;
     y1: number;
     x2: number;

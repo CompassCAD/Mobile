@@ -4,13 +4,14 @@ import { GLView } from 'expo-gl'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { FC, useCallback, useEffect, useRef, useState } from 'react'
 import {
-  BackHandler, Modal, PixelRatio, Platform, Pressable, ScrollView, StatusBar, StyleSheet,
+  Alert, BackHandler, Keyboard, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet,
   TextInput, useWindowDimensions, View, GestureResponderEvent
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Canvas from 'react-native-canvas'
 import { GraphicsRenderer, InitializeInstance } from './engine/Engine'
 import { TouchInput, TouchPoint } from './input/TouchInput'
+import { drawingSession } from '@/components/DrawingSession'
 import { registerTextPrompt } from './platform/TextPrompt'
 import { RenderSurface } from './platform/RenderSurface'
 import { Canvas2DBackend } from './render/Canvas2DBackend'
@@ -23,7 +24,6 @@ import SelectIcon from '../../assets/icons/navigate.svg'
 import NavigateIcon from '../../assets/icons/pan.svg'
 import MoveIcon from '../../assets/icons/move.svg'
 import DeleteIcon from '../../assets/icons/delete.svg'
-
 import AddPointIcon from '../../assets/icons/point.svg'
 import AddLineIcon from '../../assets/icons/line.svg'
 import AddCircleIcon from '../../assets/icons/circle.svg'
@@ -35,12 +35,21 @@ import AddBoundBoxIcon from '../../assets/icons/boundbox.svg'
 import AddTextIcon from '../../assets/icons/text.svg'
 import MeasureIcon from '../../assets/icons/measure.svg'
 
+import Animated from 'react-native-reanimated'
+import { menuEntrance } from '@/components/menuEntrance'
+import { saveDesign, saveDrawingPreview } from '@/components/DrawingFiles'
+import MenuIcon from '../../assets/icons/menu.svg'
+import UndoIcon from '../../assets/icons/undo.svg'
+import RedoIcon from '../../assets/icons/redo.svg'
+import SaveIcon from '../../assets/icons/saveLogic.svg'
+import BackIcon from '../../assets/icons/back.svg'
+
 interface ToolEntry {
   icon: FC<SvgProps> | string
   key: keyof GraphicsRenderer['modes']
 }
 
-const TOPBAR = (StatusBar.currentHeight ?? 24) + 44
+const HEADER_HEIGHT = 56
 const TOOLBAR_HEIGHT = 64
 const TOOLBAR_MARGIN = 12
 
@@ -58,7 +67,7 @@ const TOOLS: ToolEntry[] = [
   { icon: AddPolygonIcon, key: 'AddPolygon' },
   { icon: AddBoundBoxIcon, key: 'AddBoundbox' },
   { icon: AddTextIcon, key: 'AddLabel' },
-  { icon: MeasureIcon, key: 'Measure' }
+  { icon: MeasureIcon, key: 'AddMeasure' }
 ]
 export default function Editor() {
   const router = useRouter()
@@ -72,6 +81,12 @@ export default function Editor() {
   const renderer = useRef<GraphicsRenderer | null>(null)
   const stopLoop = useRef<(() => void) | null>(null)
   const touch = useRef<TouchInput | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [title, setTitle] = useState(drawingSession.title)
+  const [ready, setReady] = useState(false)
+  const saving = useRef(false)
+  const snapshot = useRef<(() => Promise<string>) | null>(null)
+  const [savingDesign, setSavingDesign] = useState(false)
   const [fps, setFps] = useState(0)
   const [active, setActive] = useState<keyof GraphicsRenderer['modes']>('Select')
   const [prompt, setPrompt] = useState<{ message: string; resolve: (v: string | null) => void } | null>(null)
@@ -89,12 +104,19 @@ export default function Editor() {
       if (key) setActive(key)
     }
     stopLoop.current = InitializeInstance(r, setFps)
+    drawingSession.restore(r)
+    setReady(true)
   }, [width, viewH])
 
   const teardown = useCallback(() => {
+    snapshot.current = null
     stopLoop.current?.(); stopLoop.current = null
     touch.current?.dispose(); touch.current = null
-    renderer.current?.dispose(); renderer.current = null
+    if (renderer.current) {
+      drawingSession.capture(renderer.current)
+      renderer.current.dispose()
+      renderer.current = null
+    }
   }, [])
 
   useEffect(() => {
@@ -104,13 +126,23 @@ export default function Editor() {
 
   useEffect(() => {
     if (Platform.OS !== 'android') return
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => { teardown(); router.back(); return true })
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (menuOpen) setMenuOpen(false)
+      else { teardown(); router.back() }
+      return true
+    })
     return () => sub.remove()
-  }, [router, teardown])
+  }, [menuOpen, router, teardown])
 
   const onGLContext = useCallback((gl: any) => {
     try {
-      boot(new GLESBackend(gl, width, viewH, PixelRatio.get()))
+      const backend = new GLESBackend(gl, width, viewH, PixelRatio.get())
+      boot(backend)
+      const r = renderer.current!
+      snapshot.current = () => backend.captureCover(() => {
+        r.markDirty('capture cover')
+        r.update()
+      })
     } catch (e) {
       console.warn('[editor] GLES backend failed, falling back to Canvas2D:', (e as Error).message)
       teardown(); setKind('canvas2d')
@@ -121,7 +153,51 @@ export default function Editor() {
     if (!c || renderer.current) return
     c.width = width; c.height = viewH
     boot(new Canvas2DBackend(c, width, viewH))
+    snapshot.current = async () => {
+      renderer.current?.markDirty('capture cover')
+      renderer.current?.update()
+      return (await c.toDataURL('image/jpeg', 0.8)).replace(/^"|"$/g, '')
+    }
   }, [boot, width, viewH])
+
+  async function saveCurrentDesign() {
+    const r = renderer.current
+    if (!r?.logicDisplay || saving.current) return
+    saving.current = true
+    setSavingDesign(true)
+    setMenuOpen(false)
+    try {
+      drawingSession.capture(r)
+      const source = drawingSession.source!
+      const identity = drawingSession.identity
+      const cover = (snapshot.current ? snapshot.current() : Promise.reject(new Error('Renderer unavailable')))
+        .then(uri => ({ uri }), error => ({ error }))
+      const file = await saveDesign(source, drawingSession.title, drawingSession.destination)
+      if (drawingSession.identity === identity) drawingSession.markSaved(file.name, source, file.uri)
+      try {
+        const result = await cover
+        if ('error' in result) throw result.error
+        await saveDrawingPreview(file.uri, result.uri)
+      } catch (error) {
+        if (renderer.current === r) Alert.alert('Design saved without a new cover', String(error))
+        return
+      }
+      if (renderer.current === r) Alert.alert('Design saved', file.name)
+    } catch (error) {
+      if (!/cancel(?:led|ed)/i.test(String(error))) Alert.alert('Could not save design', String(error))
+    } finally {
+      saving.current = false
+      setSavingDesign(false)
+    }
+  }
+
+  function historyAction(action: 'undo' | 'redo') {
+    const r = renderer.current
+    if (!r) return
+    r.setMode(r.modes.Select)
+    r[action]()
+    setMenuOpen(false)
+  }
 
   const pts = (e: GestureResponderEvent): TouchPoint[] =>
     e.nativeEvent.touches.map((t) => ({ x: t.locationX, y: t.locationY }))
@@ -148,10 +224,42 @@ export default function Editor() {
         />
       </View>
 
-      <View style={styles.topbar}>
-        <ThemedText type="default" onPress={() => { teardown(); router.back() }}>go back</ThemedText>
-        <ThemedText type="default" style={styles.fps}>{kind === 'gles' ? 'GLES' : 'Canvas2D'} · {fps} fps</ThemedText>
+      <View style={[styles.topbar, { height: insets.top + HEADER_HEIGHT, paddingTop: insets.top }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => { teardown(); router.back() }} style={styles.topbarButton}>
+          <BackIcon width={28} height={28} />
+        </Pressable>
+        <TextInput accessibilityLabel="Design name" editable={ready} value={title} selectTextOnFocus
+          returnKeyType="done" maxLength={10000} style={styles.title}
+          onChangeText={value => {
+            setTitle(value)
+            if (renderer.current) drawingSession.rename(renderer.current, value)
+          }}
+          onBlur={() => setTitle(drawingSession.title)}
+        />
+        <Pressable accessibilityRole="button" accessibilityLabel="Design menu" accessibilityState={{ expanded: menuOpen }}
+          style={styles.topbarButton} onPress={() => { Keyboard.dismiss(); setMenuOpen(!menuOpen) }}>
+          <MenuIcon width={28} height={28} />
+        </Pressable>
       </View>
+
+      {menuOpen && (
+        <View style={[styles.menuOverlay, { top: insets.top + HEADER_HEIGHT }]} accessibilityViewIsModal>
+          <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Close design menu" onPress={() => setMenuOpen(false)} />
+          <Animated.View style={styles.menu} entering={menuEntrance}>
+            {[
+              { label: 'Undo', Icon: UndoIcon, disabled: (renderer.current?.undoStack.length ?? 0) < 2, press: () => historyAction('undo') },
+              { label: 'Redo', Icon: RedoIcon, disabled: !renderer.current?.redoStack.length, press: () => historyAction('redo') },
+              { label: 'Save Design', Icon: SaveIcon, disabled: !ready || savingDesign, press: saveCurrentDesign }
+            ].map(({ label, Icon, disabled, press }) => (
+              <Pressable key={label} accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={press}
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuPressed, disabled && styles.menuDisabled]}>
+                <Icon width={24} height={24} />
+                <ThemedText>{label}</ThemedText>
+              </Pressable>
+            ))}
+          </Animated.View>
+        </View>
+      )}
 
       <View
         style={[styles.toolbar, { bottom: TOOLBAR_MARGIN + insets.bottom }]}
@@ -201,17 +309,25 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingTop: StatusBar.currentHeight,
-    height: TOPBAR,
     zIndex: 3,
     elevation: 6,
     display: 'flex',
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     borderBottomColor: Colors.dark.border,
     borderBottomWidth: 0.75,
-    boxShadow: '0px 0px 13px 3px rgba(0, 0, 0, 0.5)'
+    boxShadow: '0px 0px 13px 3px rgba(0, 0, 0, 0.5)',
   },
+  topbarButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { flex: 1, paddingVertical: 0, textAlign: 'center', color: Colors.dark.text, fontFamily: 'RadioCanadaBig-Bold', fontSize: 18 },
+  menuOverlay: { ...StyleSheet.absoluteFill, zIndex: 4, elevation: 8 },
+  menu: { position: 'absolute', right: 12, top: 12, padding: 6, backgroundColor: Colors.dark.background,
+    borderColor: Colors.dark.border, borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, boxShadow: '0 4px 14px #0006' },
+  menuItem: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderRadius: 12 },
+  menuPressed: { backgroundColor: '#343434' },
+  menuDisabled: { opacity: 0.45 },
   fps: { opacity: 0.6 },
   toolbar: {
     position: 'absolute',
@@ -229,7 +345,7 @@ const styles = StyleSheet.create({
   },
   toolRow: { paddingHorizontal: 8, gap: 6, alignItems: 'center' },
   tool: { padding: 8, borderRadius: 10 },
-  toolActive: { backgroundColor: '#00a3ff' },
+  toolActive: { backgroundColor: '#0080ff' },
   modalBg: { flex: 1, backgroundColor: '#000a', justifyContent: 'center', padding: 24 },
   modal: { backgroundColor: Colors.dark.background, borderRadius: 12, padding: 16, gap: 12 },
   input: { borderWidth: 0.75, borderColor: Colors.dark.border, borderRadius: 8, color: '#fff', padding: 10 },

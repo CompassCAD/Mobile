@@ -5,7 +5,7 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 export type ThemedTextProps = TextProps & {
   lightColor?: string;
   darkColor?: string;
-  type?: 'default' | 'title' | 'defaultSemiBold' | 'subtitle' | 'link' | 'h2';
+  type?: 'default' | 'title' | 'defaultSemiBold' | 'defaultBold' | 'subtitle' | 'link' | 'h2';
 };
 
 export function ThemedText({
@@ -23,6 +23,7 @@ export function ThemedText({
         { color },
         type === 'default' ? styles.default : undefined,
         type === 'title' ? styles.title : undefined,
+        type === 'defaultBold' ? styles.defaultBold : undefined,
         type === 'defaultSemiBold' ? styles.defaultSemiBold : undefined,
         type === 'subtitle' ? styles.subtitle : undefined,
         type === 'link' ? styles.link : undefined,
@@ -45,6 +46,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     fontFamily: 'RadioCanadaBig-Semibold'
+  },
+  defaultBold: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontFamily: 'RadioCanadaBig-Bold'
   },
   title: {
     fontSize: 32,

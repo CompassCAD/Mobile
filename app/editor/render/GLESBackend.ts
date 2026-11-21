@@ -1,6 +1,7 @@
+import { Image } from 'react-native'
 import { Asset } from 'expo-asset'
 import * as FileSystem from 'expo-file-system/legacy'
-import type { ExpoWebGLRenderingContext } from 'expo-gl'
+import { GLView, type ExpoWebGLRenderingContext } from 'expo-gl'
 import { parseColor, withAlpha } from './color'
 import { BackendImage, BatchPath, Context2DLike, RenderBackend } from './Context2DLike'
 import { arcSegments, CapKind, fillPolygon, JoinKind, Pt, Sink, strokePolyline } from './tessellate'
@@ -40,6 +41,7 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
   private count = 0
   private color = 0
 
+  private coverSize: { width: number; height: number } | null = null
   private gl: ExpoWebGLRenderingContext
   private progColor!: WebGLProgram
   private progTex!: WebGLProgram
@@ -83,7 +85,7 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
   }
   beginFrame(): void {
     const gl = this.gl
-    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
+    gl.viewport(0, 0, this.coverSize?.width ?? gl.drawingBufferWidth, this.coverSize?.height ?? gl.drawingBufferHeight)
     gl.clearColor(0.114, 0.114, 0.114, 1)
     gl.clear(gl.COLOR_BUFFER_BIT)
     this.m = [1, 0, 0, 1, 0, 0]; this.stack.length = 0
@@ -106,8 +108,46 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
     this.lastVerts = this.frameVerts; this.lastDraws = this.frameDraws
     this.frameVerts = 0; this.frameDraws = 0
     this.lastErr = this.gl.getError()
-      ; (this.gl as ExpoWebGLRenderingContext).endFrameEXP()
+    if (!this.coverSize) this.gl.endFrameEXP()
   }
+  // Keep the cover pixels alive while the native JPEG encoder reads them. The
+  // onscreen buffer can be swapped or cleared as soon as a frame is presented.
+  async captureCover(draw: () => void): Promise<string> {
+    const gl = this.gl
+    const scale = Math.min(1, 1024 / Math.max(gl.drawingBufferWidth, gl.drawingBufferHeight))
+    const width = Math.max(1, Math.round(gl.drawingBufferWidth * scale))
+    const height = Math.max(1, Math.round(gl.drawingBufferHeight * scale))
+    const target = gl.createFramebuffer()
+    const color = gl.createRenderbuffer()
+    try {
+      if (!target || !color) throw new Error('Cannot allocate drawing cover')
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target)
+      try {
+        gl.bindRenderbuffer(gl.RENDERBUFFER, color)
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA4, width, height)
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, color)
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
+          throw new Error('Cannot render drawing cover')
+        this.coverSize = { width, height }
+        draw()
+        gl.flush()
+      } finally {
+        this.coverSize = null
+        gl.bindRenderbuffer(gl.RENDERBUFFER, null)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
+      }
+      const snapshot = await GLView.takeSnapshotAsync(gl, {
+        framebuffer: target, rect: { x: 0, y: 0, width, height }, format: 'jpeg', compress: 0.8, base64: true
+      })
+      if (typeof snapshot.base64 !== 'string') throw new Error('Drawing cover is unavailable')
+      return `data:image/jpeg;base64,${snapshot.base64}`
+    } finally {
+      gl.deleteRenderbuffer(color)
+      gl.deleteFramebuffer(target)
+    }
+  }
+
   dispose(): void {
     this.gl.deleteBuffer(this.buf)
     this.gl.deleteProgram(this.progColor); this.gl.deleteProgram(this.progTex)
@@ -120,6 +160,7 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
       await FileSystem.writeAsStringAsync(uri, url.slice(url.indexOf(',') + 1), { encoding: FileSystem.EncodingType.Base64 })
     }
     const asset = await Asset.fromURI(uri).downloadAsync()
+    const size = asset.width && asset.height ? asset : await Image.getSize(asset.localUri ?? uri)
     const gl = this.gl
     const tex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, tex)
@@ -128,7 +169,7 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, asset as any)
-    const img: GLImage = { naturalWidth: asset.width ?? 100, naturalHeight: asset.height ?? 100, handle: tex }
+    const img: GLImage = { naturalWidth: size.width!, naturalHeight: size.height!, handle: tex }
     return img
   }
 

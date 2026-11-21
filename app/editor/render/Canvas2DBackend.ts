@@ -1,3 +1,4 @@
+import { Image } from 'react-native'
 import type Canvas from 'react-native-canvas'
 import { Image as CanvasImage } from 'react-native-canvas'
 import { BackendImage, BatchPath, Context2DLike, RenderBackend } from './Context2DLike'
@@ -31,7 +32,15 @@ export class Canvas2DBackend implements RenderBackend, Context2DLike {
   loadImage(url: string): Promise<BackendImage> {
     return new Promise((resolve, reject) => {
       const img = new CanvasImage(this.canvas)
-      img.addEventListener('load', () => resolve({ naturalWidth: (img as any).width || 100, naturalHeight: (img as any).height || 100, handle: img }))
+      img.addEventListener('load', () => {
+        if (img.width > 0 && img.height > 0) {
+          resolve({ naturalWidth: img.width, naturalHeight: img.height, handle: img })
+          return
+        }
+        Image.getSize(url).then(({ width, height }) => {
+          resolve({ naturalWidth: width, naturalHeight: height, handle: img })
+        }, reject)
+      })
       img.addEventListener('error', () => reject(new Error('image load failed')))
       img.src = url
     })

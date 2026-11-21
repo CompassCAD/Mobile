@@ -50,14 +50,9 @@ export class TouchInput {
       r.camY += py / r.zoom
       r.markDirty('two-finger pan')
     }
-    if (wanted !== 1 && isFinite(wanted) && wanted > 0) {
-      // setZoom() ignores a whole step that lands outside [0.25, 15]; clamp so we can reach the limits
-      const target = Math.min(14.99, Math.max(0.26, r.zoom * wanted))
-      const factor = target / r.zoom
-      if (Math.abs(factor - 1) > 1e-4) {
-        this.setCursor(this.mid) // setZoom pivots around the cursor position
-        r.setZoom(factor)
-      }
+    if (Number.isFinite(wanted) && wanted > 0 && Math.abs(wanted - 1) > 1e-4) {
+      this.setCursor(this.mid)
+      r.setZoom(wanted)
     }
   }
 
