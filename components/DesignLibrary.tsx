@@ -49,11 +49,7 @@ export function DesignLibrary({ recent }: { recent: boolean }) {
     <SafeView style={styles.home} edges={['top', 'left', 'right']}>
       <FlatList data={designs} keyExtractor={item => item.uri} contentContainerStyle={styles.list}
         ListHeaderComponent={<View style={styles.header}>
-          <ThemedText type="title">{recent ? 'Recent designs' : 'Designs'}</ThemedText>
-          {recent && <Link href="/explore" asChild><Pressable><ThemedText type="link">View all designs</ThemedText></Pressable></Link>}
-          {recent && drawingSession.source && <Link href="/editor" asChild>
-            <Pressable><ThemedText type="link">Continue {drawingSession.title}</ThemedText></Pressable>
-          </Link>}
+          <ThemedText type="title">{recent ? 'a' : 'Designs'}</ThemedText>
         </View>}
         ListEmptyComponent={<ThemedText>Your saved designs will appear here.</ThemedText>}
         ListFooterComponent={recent && __DEV__ ? <Link href="/gltest">GL tests</Link> : undefined}

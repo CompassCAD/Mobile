@@ -4,6 +4,8 @@ import * as FileSystem from 'expo-file-system/legacy'
 import { GLView, type ExpoWebGLRenderingContext } from 'expo-gl'
 import { parseColor, withAlpha } from './color'
 import { BackendImage, BatchPath, Context2DLike, RenderBackend } from './Context2DLike'
+import './polyfill/buffer' // must come before jpeg-js
+import jpeg from 'jpeg-js'
 import { arcSegments, CapKind, fillPolygon, JoinKind, Pt, Sink, strokePolyline } from './tessellate'
 
 const VS = `attribute vec2 a_pos; attribute vec4 a_col; attribute vec2 a_uv;
@@ -119,33 +121,41 @@ export class GLESBackend implements RenderBackend, Context2DLike, Sink {
     const height = Math.max(1, Math.round(gl.drawingBufferHeight * scale))
     const target = gl.createFramebuffer()
     const color = gl.createRenderbuffer()
+    let pixels: Uint8Array
     try {
       if (!target || !color) throw new Error('Cannot allocate drawing cover')
       gl.bindFramebuffer(gl.FRAMEBUFFER, target)
       try {
         gl.bindRenderbuffer(gl.RENDERBUFFER, color)
-        gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA4, width, height)
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, width, height)
         gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, color)
         if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
           throw new Error('Cannot render drawing cover')
         this.coverSize = { width, height }
         draw()
         gl.flush()
+        // Read while the cover framebuffer is still bound.
+        pixels = new Uint8Array(width * height * 4)
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
       } finally {
         this.coverSize = null
         gl.bindRenderbuffer(gl.RENDERBUFFER, null)
         gl.bindFramebuffer(gl.FRAMEBUFFER, null)
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
       }
-      const snapshot = await GLView.takeSnapshotAsync(gl, {
-        framebuffer: target, rect: { x: 0, y: 0, width, height }, format: 'jpeg', compress: 0.8, base64: true
-      })
-      if (typeof snapshot.base64 !== 'string') throw new Error('Drawing cover is unavailable')
-      return `data:image/jpeg;base64,${snapshot.base64}`
     } finally {
       gl.deleteRenderbuffer(color)
       gl.deleteFramebuffer(target)
     }
+
+    // GL reads rows bottom-up; JPEG expects top-down.
+    const stride = width * 4
+    const flipped = new Uint8Array(pixels.length)
+    for (let y = 0; y < height; y++) {
+      flipped.set(pixels.subarray((height - 1 - y) * stride, (height - y) * stride), y * stride)
+    }
+    const { data } = jpeg.encode({ data: flipped, width, height }, 80)
+    return `data:image/jpeg;base64,${Buffer.from(data).toString('base64')}`
   }
 
   dispose(): void {
